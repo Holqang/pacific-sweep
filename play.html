@@ -14,8 +14,9 @@
   dt { color: #8eb4c9; font-size: 12px; }
   dd { margin: 0; font-size: 18px; }
   #go { margin: 0 16px 8px; height: 56px; border: 0; border-radius: 12px; background: #e2b657; color: #041821; font-size: 22px; font-weight: 700; cursor: pointer; }
-  #stage { flex: 1; min-height: 0; display: flex; justify-content: center; padding: 0 12px 12px; }
-  canvas { height: 100%; max-height: 720px; width: auto; max-width: 100%; background: #062a48; border-radius: 12px; touch-action: none; }
+  #stage { flex: 1; min-height: 0; display: flex; justify-content: center; padding: 0 12px 8px; }
+  canvas { height: 100%; max-height: 720px; width: auto; max-width: 100%; background: #0c4e72; border-radius: 12px; touch-action: none; }
+  #help { margin: 0 16px 8px; color: #8eb4c9; font-size: 14px; }
   .pad { display: grid; grid-template-columns: 1fr auto; gap: 8px; padding: 0 12px 12px; }
   .dpad { display: grid; grid-template-columns: repeat(3, 56px); gap: 4px; }
   .pad button { height: 56px; min-width: 64px; border: 0; border-radius: 12px; background: #0c3348; color: #e8f4fb; font-size: 16px; }
@@ -26,7 +27,7 @@
 <header>
   <div>
     <h1>Pacific Sweep</h1>
-    <p class="sub">Updated look · sunlit seas</p>
+    <p class="sub">Hong Kong · air and airport</p>
   </div>
   <dl>
     <div><dt>Score</dt><dd id="score">0</dd></div>
@@ -36,7 +37,7 @@
 </header>
 <button id="go" type="button">✈ Take off</button>
 <div id="stage"><canvas id="c" width="480" height="720" tabindex="0"></canvas></div>
-<p id="hud" style="margin:0 16px 8px;color:#8eb4c9;font-size:14px">Lives <span id="lives">3</span> · Rolls <span id="rolls">3</span></p>
+<p id="help">Lives <span id="lives">3</span> · Rolls <span id="rolls">2</span> · Fire <span id="fire">1</span> · Airport <span id="port">22</span>. Gold P upgrades guns. Blue crates supply the army. Dive when the runway is clear.</p>
 <div class="pad">
   <div class="dpad">
     <span></span><button data-code="ArrowUp">Up</button><span></span>
@@ -53,7 +54,8 @@
   // src/game/arcade.ts
   var WORLD_W = 480;
   var WORLD_H = 720;
-  var SPEED = 280;
+  var GROUND_TOP = 548;
+  var SPEED = 300;
   var idle = {
     left: false,
     right: false,
@@ -70,10 +72,14 @@
     score = 0;
     best = 0;
     lives = 3;
-    rolls = 3;
+    rolls = 2;
     wave = 1;
     scroll = 0;
-    player = { x: WORLD_W / 2, y: WORLD_H - 120, vx: 0, vy: 0 };
+    weapon = 1;
+    airport = 22;
+    runway = 0;
+    bannerText = "";
+    player = { x: WORLD_W / 2, y: 460, vx: 0, vy: 0 };
     rollT = 0;
     inv = 0;
     shotCd = 0;
@@ -90,10 +96,15 @@
     rings = [];
     muzzles = [];
     booms = [];
+    pickups = [];
+    troops = [];
+    foes = [];
     islands = [];
     boss = null;
     onMode = null;
     rollHeld = false;
+    foeSpawn = 2.2;
+    reinforce = 5;
     beep = null;
     constructor() {
       try {
@@ -101,13 +112,14 @@
       } catch {
         this.best = 0;
       }
-      for (let i = 0; i < 7; i++) {
+      for (let i = 0; i < 5; i++) {
         this.islands.push({
-          x: 40 + Math.random() * (WORLD_W - 80),
-          y: Math.random() * WORLD_H,
-          r: 16 + Math.random() * 26
+          x: 36 + Math.random() * (WORLD_W - 72),
+          y: Math.random() * GROUND_TOP,
+          r: 18 + Math.random() * 28
         });
       }
+      this.seedArmy();
     }
     setBeep(fn) {
       this.beep = fn;
@@ -116,17 +128,34 @@
       this.mode = mode;
       this.onMode?.(mode);
     }
+    seedArmy() {
+      this.troops = [
+        { x: 36, hp: 4, cool: 0.2, heavy: false },
+        { x: 68, hp: 4, cool: 0.4, heavy: false },
+        { x: 102, hp: 6, cool: 0.1, heavy: true }
+      ];
+      this.foes = [
+        { x: 340, hp: 3, cool: 0.3, kind: "soldier" },
+        { x: 378, hp: 3, cool: 0.5, kind: "soldier" },
+        { x: 420, hp: 8, cool: 0.4, kind: "tank" }
+      ];
+      this.airport = 22;
+      this.runway = 0;
+      this.foeSpawn = 2.4;
+      this.reinforce = 6;
+    }
     start() {
       this.score = 0;
       this.lives = 3;
-      this.rolls = 3;
+      this.rolls = 2;
       this.wave = 1;
+      this.weapon = 1;
       this.player.x = WORLD_W / 2;
-      this.player.y = WORLD_H - 140;
+      this.player.y = 430;
       this.player.vx = 0;
       this.player.vy = 0;
       this.rollT = 0;
-      this.inv = 1.2;
+      this.inv = 1.1;
       this.shotCd = 0;
       this.shake = 0;
       this.hurtFlash = 0;
@@ -138,25 +167,202 @@
       this.rings = [];
       this.muzzles = [];
       this.booms = [];
+      this.pickups = [];
       this.boss = null;
       this.waiting = true;
-      this.spawnDelay = 0.6;
-      this.banner = 1.4;
+      this.spawnDelay = 0.35;
+      this.banner = 1.6;
+      this.bannerText = "HONG KONG";
       this.rollHeld = false;
+      this.seedArmy();
       this.setMode("play");
     }
     step(dt, actions = idle) {
-      this.scroll += dt * (42 + this.wave);
+      this.scroll += dt * (48 + this.wave * 4);
       for (const isl of this.islands) {
-        isl.y += dt * 36;
-        if (isl.y - isl.r > WORLD_H) {
+        isl.y += dt * 42;
+        if (isl.y - isl.r > GROUND_TOP) {
           isl.y = -isl.r;
-          isl.x = 40 + Math.random() * (WORLD_W - 80);
+          isl.x = 36 + Math.random() * (WORLD_W - 72);
         }
       }
       if (this.shake > 0) this.shake = Math.max(0, this.shake - dt);
       if (this.hurtFlash > 0) this.hurtFlash = Math.max(0, this.hurtFlash - dt);
       if (this.banner > 0) this.banner = Math.max(0, this.banner - dt);
+      this.driftFx(dt);
+      this.stepGround(dt);
+      if (this.mode !== "play") return;
+      const p = this.player;
+      let mx = 0;
+      let my = 0;
+      if (actions.left) mx -= 1;
+      if (actions.right) mx += 1;
+      if (actions.up) my -= 1;
+      if (actions.down) my += 1;
+      const len = Math.hypot(mx, my);
+      if (len > 0) {
+        p.vx = mx / len * SPEED;
+        p.vy = my / len * SPEED;
+      } else {
+        p.vx = 0;
+        p.vy = 0;
+      }
+      p.x = Math.max(24, Math.min(WORLD_W - 24, p.x + p.vx * dt));
+      p.y = Math.max(48, Math.min(GROUND_TOP - 36, p.y + p.vy * dt));
+      if (this.rollT > 0) this.rollT = Math.max(0, this.rollT - dt);
+      if (this.inv > 0) this.inv = Math.max(0, this.inv - dt);
+      if (actions.roll && !this.rollHeld && this.rollT === 0 && this.rolls > 0) {
+        this.rolls -= 1;
+        this.rollT = 0.48;
+        this.inv = 0.48;
+        this.beep?.(520, 0.12, 0.05);
+      }
+      this.rollHeld = actions.roll;
+      this.shotCd = Math.max(0, this.shotCd - dt);
+      if (actions.fire && this.shotCd === 0 && this.rollT === 0) this.fireGuns();
+      if (this.rollT === 0 && Math.random() < 0.4) this.puff(p.x, p.y + 34, 7);
+      if (this.waiting) {
+        this.spawnDelay -= dt;
+        if (this.spawnDelay <= 0) {
+          this.spawnWave();
+          this.waiting = false;
+        }
+      } else if (!this.boss && this.enemies.length === 0) {
+        this.wave += 1;
+        this.waiting = true;
+        this.spawnDelay = 0.75;
+        this.banner = 1.15;
+        this.bannerText = `WAVE ${this.wave}`;
+        if (this.wave % 4 === 0) this.rolls = Math.min(4, this.rolls + 1);
+      }
+      for (const b of this.bullets) {
+        b.x += b.vx * dt;
+        b.y += b.vy * dt;
+      }
+      this.bullets = this.bullets.filter((b) => !b.dead && b.y > -30 && b.x > -20 && b.x < WORLD_W + 20);
+      const bulletSpeed = 230 + this.wave * 16;
+      for (const e of this.enemies) {
+        e.t += dt;
+        const speed = (e.kind === "bomber" ? 78 : e.kind === "ace" ? 145 : 118) + this.wave * 4;
+        e.y += speed * dt;
+        e.x += Math.sin(e.t * (e.kind === "ace" ? 3.1 : 1.8)) * e.amp * dt;
+        e.x = Math.max(24, Math.min(WORLD_W - 24, e.x));
+        e.cool -= dt;
+        const cool = Math.max(0.38, (e.kind === "ace" ? 0.62 : e.kind === "bomber" ? 1.05 : 0.85) - this.wave * 0.05);
+        if (e.cool <= 0 && e.y > 20 && e.y < GROUND_TOP - 70) {
+          e.cool = cool;
+          this.enemyShot(e.x, e.y + 16, p.x, p.y, bulletSpeed, e.kind === "ace" ? 3 : 1);
+        }
+        if (e.y > GROUND_TOP - 6) {
+          this.strafeArmy(e.x);
+          e.hp = 0;
+        }
+      }
+      if (this.boss) {
+        const b = this.boss;
+        b.t += dt;
+        if (b.y < 110) b.y += 48 * dt;
+        b.x = WORLD_W / 2 + Math.sin(b.t * 1.15) * 160;
+        b.cool -= dt;
+        if (b.cool <= 0 && b.y > 36) {
+          b.cool = Math.max(0.32, 0.48 - this.wave * 0.02);
+          for (let i = -3; i <= 3; i++) {
+            this.ebullets.push({ x: b.x + i * 18, y: b.y + 36, vx: i * 55, vy: 210 + this.wave * 8 });
+          }
+        }
+      }
+      for (const b of this.ebullets) {
+        b.x += b.vx * dt;
+        b.y += b.vy * dt;
+      }
+      this.ebullets = this.ebullets.filter((b) => b.y < GROUND_TOP + 8 && b.y > -20 && b.x > -30 && b.x < WORLD_W + 30);
+      for (const item of this.pickups) {
+        item.y += item.vy * dt;
+        item.spin += dt * 6;
+      }
+      for (const item of this.pickups) {
+        if (item.kind === "power" && hit(p.x, p.y, 30, 28, item.x, item.y, 18, 18)) {
+          item.y = 9999;
+          this.gainPower();
+        } else if (item.kind === "supply" && item.y >= GROUND_TOP - 4) {
+          item.y = 9999;
+          this.deliverSupply(item.x);
+        }
+      }
+      this.pickups = this.pickups.filter((item) => item.y < GROUND_TOP + 10);
+      for (const b of this.bullets) {
+        for (const e of this.enemies) {
+          if (b.dead || e.hp <= 0) continue;
+          const size = e.kind === "bomber" ? 54 : 26;
+          if (hit(b.x, b.y, 8, 16, e.x, e.y, size, size * 0.7)) {
+            b.dead = true;
+            e.hp -= 1;
+            this.burst(b.x, b.y, "#ffe7a3", 4);
+            if (e.hp <= 0) this.killEnemy(e);
+            else if (Math.random() < 0.22) this.drop(e.x, e.y, "power");
+          }
+        }
+        if (this.boss && !b.dead && hit(b.x, b.y, 8, 16, this.boss.x, this.boss.y, 90, 48)) {
+          b.dead = true;
+          this.boss.hp -= 1;
+          this.shake = Math.max(this.shake, 0.05);
+          if (this.boss.hp % 8 === 0) this.drop(this.boss.x, this.boss.y + 20, "power");
+          if (this.boss.hp <= 0) {
+            this.score += 2500;
+            this.explode(this.boss.x, this.boss.y, "#ffd56a", 1.6);
+            this.drop(this.boss.x - 20, this.boss.y, "power");
+            this.drop(this.boss.x + 20, this.boss.y, "supply");
+            this.boss = null;
+            this.lives = Math.min(5, this.lives + 1);
+            this.beep?.(180, 0.25, 0.06);
+          }
+        }
+      }
+      this.bullets = this.bullets.filter((b) => !b.dead);
+      this.enemies = this.enemies.filter((e) => e.hp > 0 && e.y < GROUND_TOP + 20);
+      if (this.runway > 0 && p.y > GROUND_TOP - 78) this.land();
+      const safe = this.inv > 0 || this.rollT > 0;
+      if (!safe) {
+        const tagged = this.ebullets.some((b) => hit(p.x, p.y, 22, 22, b.x, b.y, 10, 10)) || this.enemies.some((e) => hit(p.x, p.y, 22, 20, e.x, e.y, 28, 22)) || (this.boss ? hit(p.x, p.y, 22, 20, this.boss.x, this.boss.y, 76, 36) : false);
+        if (tagged) this.hurt();
+      }
+    }
+    fireGuns() {
+      const p = this.player;
+      const lvl = this.weapon;
+      this.shotCd = [0.13, 0.11, 0.09, 0.075][lvl - 1] ?? 0.13;
+      const shots = [];
+      if (lvl <= 1) {
+        shots.push({ ox: -10, vx: 0, vy: -760 }, { ox: 10, vx: 0, vy: -760 });
+      } else if (lvl === 2) {
+        shots.push({ ox: -16, vx: -30, vy: -760 }, { ox: 0, vx: 0, vy: -800 }, { ox: 16, vx: 30, vy: -760 });
+      } else {
+        for (const angle of [-0.42, -0.2, 0, 0.2, 0.42]) {
+          shots.push({ ox: 0, vx: Math.sin(angle) * 780, vy: -Math.cos(angle) * 780 });
+        }
+        if (lvl >= 4) {
+          shots.push({ ox: -20, vx: -420, vy: -280 }, { ox: 20, vx: 420, vy: -280 });
+        }
+      }
+      for (const s of shots) this.bullets.push({ x: p.x + s.ox, y: p.y - 26, vx: s.vx, vy: s.vy });
+      this.muzzles.push({ x: p.x, y: p.y - 34, life: 0.05, friendly: true });
+      this.beep?.(760 + lvl * 40, 0.04, 0.03);
+    }
+    enemyShot(x, y, px, py, speed, count) {
+      const dx = px - x;
+      const dy = py - y;
+      const m = Math.hypot(dx, dy) || 1;
+      const spread = count === 1 ? [0] : [-0.28, 0, 0.28];
+      for (const a of spread) {
+        const cs = Math.cos(a);
+        const sn = Math.sin(a);
+        const vx = (dx * cs - dy * sn) / m * speed;
+        const vy = Math.max(120, (dx * sn + dy * cs) / m * speed);
+        this.ebullets.push({ x, y, vx, vy });
+      }
+      this.muzzles.push({ x, y, life: 0.05, friendly: false });
+    }
+    driftFx(dt) {
       for (const s of this.sparks) {
         s.x += s.vx * dt;
         s.y += s.vy * dt;
@@ -177,168 +383,164 @@
       this.muzzles = this.muzzles.filter((m) => m.life > 0);
       for (const b of this.booms) b.life -= dt;
       this.booms = this.booms.filter((b) => b.life > 0);
+    }
+    stepGround(dt) {
       if (this.mode !== "play") return;
-      const p = this.player;
-      let mx = 0;
-      let my = 0;
-      if (actions.left) mx -= 1;
-      if (actions.right) mx += 1;
-      if (actions.up) my -= 1;
-      if (actions.down) my += 1;
-      const len = Math.hypot(mx, my);
-      if (len > 0) {
-        p.vx = mx / len * SPEED;
-        p.vy = my / len * SPEED;
+      this.foeSpawn -= dt;
+      if (this.foeSpawn <= 0) {
+        this.foeSpawn = Math.max(0.85, 2.8 - this.wave * 0.22);
+        const tank = this.wave > 1 && Math.random() < 0.28 + this.wave * 0.04;
+        this.foes.push({
+          x: WORLD_W + 8,
+          hp: tank ? 7 + this.wave : 3 + Math.floor(this.wave / 2),
+          cool: 0.35,
+          kind: tank ? "tank" : "soldier"
+        });
+      }
+      this.reinforce -= dt;
+      if (this.troops.length < 2 && this.reinforce <= 0) {
+        this.reinforce = 7;
+        this.troops.push({ x: 18, hp: 3, cool: 0.3, heavy: false });
+      }
+      for (const s of this.troops) {
+        const foe = this.foes.find((f) => f.x > s.x);
+        const range = s.heavy ? 168 : 108;
+        if (foe && foe.x - s.x < range) {
+          s.cool -= dt;
+          if (s.cool <= 0) {
+            s.cool = s.heavy ? 0.16 : 0.42;
+            foe.hp -= s.heavy ? 2 : 1;
+            this.muzzles.push({ x: s.x + 10, y: GROUND_TOP + 78, life: 0.04, friendly: true });
+          }
+        } else {
+          s.x += dt * (s.heavy ? 26 : 40);
+        }
+        s.x = Math.min(WORLD_W - 86, s.x);
+      }
+      for (const f of this.foes) {
+        let target2 = null;
+        for (const s of this.troops) {
+          if (s.x < f.x && (!target2 || s.x > target2.x)) target2 = s;
+        }
+        const range = f.kind === "tank" ? 150 : 96;
+        if (target2 && f.x - target2.x < range) {
+          f.cool -= dt;
+          if (f.cool <= 0) {
+            f.cool = f.kind === "tank" ? 0.55 : 0.38;
+            target2.hp -= f.kind === "tank" ? 2 : 1;
+            this.muzzles.push({ x: f.x - 8, y: GROUND_TOP + 78, life: 0.04, friendly: false });
+          }
+        } else {
+          f.x -= dt * (f.kind === "tank" ? 22 : 34 + this.wave * 2);
+        }
+      }
+      this.foes = this.foes.filter((f) => f.hp > 0 && f.x > -20);
+      this.troops = this.troops.filter((s) => s.hp > 0);
+      const lead = this.troops.length ? Math.max(...this.troops.map((s) => s.x)) : 0;
+      const pressure = this.foes.reduce((n, f) => n + (f.kind === "tank" ? 2 : 1), 0);
+      const target = Math.max(0, Math.min(100, lead / (WORLD_W - 70) * 112 - pressure * 7));
+      this.airport += (target - this.airport) * Math.min(1, dt * 1.4);
+      if (this.airport >= 97 && this.runway <= 0) {
+        this.runway = 8;
+        this.banner = 1.4;
+        this.bannerText = "RUNWAY CLEAR";
+        this.beep?.(660, 0.18, 0.05);
+      }
+      if (this.runway > 0) this.runway = Math.max(0, this.runway - dt);
+    }
+    strafeArmy(x) {
+      const s = this.troops.reduce((best, t) => {
+        if (!best || Math.abs(t.x - x) < Math.abs(best.x - x)) return t;
+        return best;
+      }, null);
+      if (s) s.hp -= 2;
+      this.explode(x, GROUND_TOP - 10, "#ffb0a0", 0.7);
+      this.airport = Math.max(0, this.airport - 6);
+    }
+    deliverSupply(x) {
+      this.score += 40;
+      this.airport = Math.min(100, this.airport + 8);
+      const hurt = this.troops.reduce((best, t) => {
+        if (!best || t.hp < best.hp) return t;
+        return best;
+      }, null);
+      if (!hurt || this.troops.length < 4) {
+        this.troops.push({ x: Math.max(16, Math.min(WORLD_W - 120, x)), hp: 4, cool: 0.2, heavy: this.troops.length % 3 === 0 });
       } else {
-        p.vx = 0;
-        p.vy = 0;
+        hurt.hp = Math.min(8, hurt.hp + 3);
       }
-      p.x = Math.max(28, Math.min(WORLD_W - 28, p.x + p.vx * dt));
-      p.y = Math.max(56, Math.min(WORLD_H - 40, p.y + p.vy * dt));
-      if (this.rollT > 0) this.rollT = Math.max(0, this.rollT - dt);
-      if (this.inv > 0) this.inv = Math.max(0, this.inv - dt);
-      if (actions.roll && !this.rollHeld && this.rollT === 0 && this.rolls > 0) {
-        this.rolls -= 1;
-        this.rollT = 0.55;
-        this.inv = 0.55;
-        this.beep?.(520, 0.12, 0.05);
+      this.banner = 0.7;
+      this.bannerText = "SUPPLY";
+      this.beep?.(420, 0.08, 0.04);
+    }
+    gainPower() {
+      if (this.weapon < 4) {
+        this.weapon += 1;
+        this.banner = 0.8;
+        this.bannerText = `FIRE ${this.weapon}`;
+      } else {
+        this.score += 250;
+        this.banner = 0.7;
+        this.bannerText = "MAX FIRE";
+        if (this.troops.length < 5) this.troops.push({ x: 24, hp: 6, cool: 0.1, heavy: true });
       }
-      this.rollHeld = actions.roll;
-      this.shotCd = Math.max(0, this.shotCd - dt);
-      if (actions.fire && this.shotCd === 0 && this.rollT === 0) {
-        this.shotCd = 0.14;
-        this.bullets.push({ x: p.x - 10, y: p.y - 28, vx: 0, vy: -680 });
-        this.bullets.push({ x: p.x + 10, y: p.y - 28, vx: 0, vy: -680 });
-        this.muzzles.push({ x: p.x, y: p.y - 34, life: 0.06, friendly: true });
-        this.beep?.(760, 0.04, 0.03);
-      }
-      if (this.mode === "play" && this.rollT === 0 && Math.random() < 0.45) {
-        this.puff(p.x, p.y + 34, 7);
-      }
-      if (this.waiting) {
-        this.spawnDelay -= dt;
-        if (this.spawnDelay <= 0) {
-          this.spawnWave();
-          this.waiting = false;
-        }
-      } else if (!this.boss && this.enemies.length === 0) {
-        this.wave += 1;
-        this.waiting = true;
-        this.spawnDelay = 1.1;
-        this.banner = 1.2;
-        if (this.wave % 4 === 0) this.rolls = Math.min(5, this.rolls + 1);
-      }
-      for (const b of this.bullets) {
-        b.x += b.vx * dt;
-        b.y += b.vy * dt;
-      }
-      this.bullets = this.bullets.filter((b) => !b.dead && b.y > -20);
-      for (const e of this.enemies) {
-        e.t += dt;
-        const speed = e.kind === "bomber" ? 70 : e.kind === "ace" ? 120 : 100;
-        e.y += speed * dt;
-        e.x += Math.sin(e.t * (e.kind === "ace" ? 2.4 : 1.4)) * e.amp * dt;
-        e.cool -= dt;
-        if (e.cool <= 0 && e.y > 30 && e.y < WORLD_H - 120) {
-          e.cool = e.kind === "ace" ? 0.9 : e.kind === "bomber" ? 1.6 : 1.5;
-          const dx = p.x - e.x;
-          const dy = p.y - e.y;
-          const m = Math.hypot(dx, dy) || 1;
-          this.ebullets.push({
-            x: e.x,
-            y: e.y + 16,
-            vx: dx / m * 180,
-            vy: Math.max(140, dy / m * 180)
-          });
-          this.muzzles.push({ x: e.x, y: e.y + 18, life: 0.05, friendly: false });
-        }
-      }
-      if (this.boss) {
-        const b = this.boss;
-        b.t += dt;
-        if (b.y < 130) b.y += 40 * dt;
-        b.x = WORLD_W / 2 + Math.sin(b.t * 0.9) * 150;
-        b.cool -= dt;
-        if (b.cool <= 0 && b.y > 40) {
-          b.cool = 0.55;
-          for (let i = -2; i <= 2; i++) {
-            this.ebullets.push({ x: b.x + i * 22, y: b.y + 36, vx: i * 40, vy: 200 });
-          }
-        }
-      }
-      for (const b of this.ebullets) {
-        b.x += b.vx * dt;
-        b.y += b.vy * dt;
-      }
-      this.ebullets = this.ebullets.filter(
-        (b) => b.y < WORLD_H + 20 && b.x > -30 && b.x < WORLD_W + 30
+      this.beep?.(880, 0.09, 0.05);
+    }
+    land() {
+      this.runway = 0;
+      this.airport = 48;
+      this.score += 800;
+      this.lives = Math.min(5, this.lives + 1);
+      this.banner = 1.3;
+      this.bannerText = "LANDED";
+      this.foes.push(
+        { x: WORLD_W - 10, hp: 4 + this.wave, cool: 0.2, kind: "soldier" },
+        { x: WORLD_W + 24, hp: 8 + this.wave, cool: 0.3, kind: "tank" }
       );
-      for (const b of this.bullets) {
-        for (const e of this.enemies) {
-          if (b.dead || e.hp <= 0) continue;
-          const size = e.kind === "bomber" ? 54 : 28;
-          if (hit(b.x, b.y, 8, 16, e.x, e.y, size, size * 0.7)) {
-            b.dead = true;
-            e.hp -= 1;
-            this.burst(b.x, b.y, "#ffe7a3", 4);
-            if (e.hp <= 0) this.killEnemy(e);
-          }
-        }
-        if (this.boss && !b.dead && hit(b.x, b.y, 8, 16, this.boss.x, this.boss.y, 90, 48)) {
-          b.dead = true;
-          this.boss.hp -= 1;
-          this.shake = Math.max(this.shake, 0.05);
-          if (this.boss.hp <= 0) {
-            this.score += 2e3;
-            this.explode(this.boss.x, this.boss.y, "#ffd56a", 1.6);
-            this.boss = null;
-            this.lives = Math.min(5, this.lives + 1);
-            this.beep?.(180, 0.25, 0.06);
-          }
-        }
-      }
-      this.bullets = this.bullets.filter((b) => !b.dead);
-      this.enemies = this.enemies.filter((e) => e.hp > 0 && e.y < WORLD_H + 50);
-      const safe = this.inv > 0 || this.rollT > 0;
-      if (!safe) {
-        const tagged = this.ebullets.some((b) => hit(p.x, p.y, 26, 26, b.x, b.y, 10, 10)) || this.enemies.some((e) => hit(p.x, p.y, 24, 22, e.x, e.y, 30, 24)) || (this.boss ? hit(p.x, p.y, 24, 22, this.boss.x, this.boss.y, 80, 40) : false);
-        if (tagged) this.hurt();
-      }
+      this.beep?.(520, 0.2, 0.06);
+    }
+    drop(x, y, kind) {
+      if (this.pickups.length > 14) this.pickups.shift();
+      this.pickups.push({ x, y, vy: kind === "supply" ? 90 : 70, kind, spin: 0 });
     }
     spawnWave() {
       const n = this.wave;
-      if (n % 5 === 0) {
-        const hp = 26 + n * 3;
-        this.boss = { x: WORLD_W / 2, y: -70, hp, max: hp, t: 0, cool: 0.8 };
+      if (n % 4 === 0) {
+        const hp = 34 + n * 6;
+        this.boss = { x: WORLD_W / 2, y: -80, hp, max: hp, t: 0, cool: 0.45 };
+        this.bannerText = "BOMBER";
         this.beep?.(140, 0.28, 0.05);
         return;
       }
-      const count = 4 + n % 3;
-      const kind = n % 3 === 0 ? "bomber" : n % 4 === 0 ? "ace" : "fighter";
+      const count = Math.min(11, 5 + n);
       for (let i = 0; i < count; i++) {
+        const kind = i % 5 === 4 ? "ace" : i % 4 === 3 ? "bomber" : "fighter";
         this.enemies.push({
           kind,
-          x: 60 + i * (WORLD_W - 120) / Math.max(1, count - 1),
-          y: -30 - i * 36,
-          hp: kind === "bomber" ? 4 : kind === "ace" ? 2 : 1,
-          t: i * 0.2,
-          cool: 0.8 + Math.random() * 0.6,
-          amp: kind === "ace" ? 90 : 40
+          x: 40 + (i * 67 + n * 30) % (WORLD_W - 80),
+          y: -24 - i * 28,
+          hp: kind === "bomber" ? 5 : kind === "ace" ? 3 : 2,
+          t: i * 0.35,
+          cool: 0.25 + Math.random() * 0.45,
+          amp: kind === "ace" ? 110 : 55
         });
       }
     }
     killEnemy(e) {
       e.hp = 0;
-      this.score += e.kind === "bomber" ? 300 : e.kind === "ace" ? 200 : 100;
+      this.score += e.kind === "bomber" ? 300 : e.kind === "ace" ? 220 : 100;
       const color = e.kind === "bomber" ? "#e7c48a" : e.kind === "ace" ? "#ffd0a8" : "#ffb0a0";
       this.explode(e.x, e.y, color, e.kind === "bomber" ? 1.25 : 1);
+      this.drop(e.x - 12, e.y, "power");
+      this.drop(e.x + 12, e.y, "supply");
       this.beep?.(200, 0.08, 0.04);
     }
     hurt() {
       this.lives -= 1;
-      this.inv = 1.5;
+      this.inv = 1.05;
       this.shake = 0.28;
       this.hurtFlash = 0.35;
+      if (this.weapon > 1) this.weapon -= 1;
       this.explode(this.player.x, this.player.y, "#9ad7ff", 0.8);
       this.ebullets = [];
       this.beep?.(90, 0.3, 0.06);
@@ -434,76 +636,93 @@
     ctx2.clearRect(0, 0, WORLD_W, WORLD_H);
     ctx2.save();
     ctx2.translate(shakeX, shakeY);
-    const sky = ctx2.createLinearGradient(0, 0, 0, WORLD_H);
-    sky.addColorStop(0, "#b7e6ff");
-    sky.addColorStop(0.18, "#5eb0e0");
-    sky.addColorStop(0.46, "#1a6ea6");
-    sky.addColorStop(1, "#062a48");
+    const sky = ctx2.createLinearGradient(0, 0, 0, GROUND_TOP);
+    sky.addColorStop(0, "#d7f1ff");
+    sky.addColorStop(0.22, "#7ec4ea");
+    sky.addColorStop(0.55, "#1f7eae");
+    sky.addColorStop(1, "#0c4e72");
     ctx2.fillStyle = sky;
-    ctx2.fillRect(-12, -12, WORLD_W + 24, WORLD_H + 24);
+    ctx2.fillRect(-12, -12, WORLD_W + 24, GROUND_TOP + 8);
     ctx2.save();
-    ctx2.globalAlpha = 0.18;
+    ctx2.globalAlpha = 0.16;
     ctx2.fillStyle = "#fff6d0";
     ctx2.beginPath();
-    ctx2.moveTo(WORLD_W * 0.72, -20);
-    ctx2.lineTo(140, WORLD_H * 0.42);
-    ctx2.lineTo(220, WORLD_H * 0.42);
+    ctx2.moveTo(WORLD_W * 0.7, -16);
+    ctx2.lineTo(150, GROUND_TOP * 0.48);
+    ctx2.lineTo(230, GROUND_TOP * 0.48);
     ctx2.closePath();
     ctx2.fill();
     ctx2.restore();
-    glow(ctx2, WORLD_W * 0.78, 36, 90, "rgba(255,244,210,0.55)");
-    ctx2.globalCompositeOperation = "source-over";
-    for (let layer = 0; layer < 3; layer++) {
-      const speed = 0.55 + layer * 0.35;
-      const alpha = 0.08 + layer * 0.05;
-      ctx2.strokeStyle = `rgba(255,255,255,${alpha})`;
-      ctx2.lineWidth = layer === 2 ? 2.2 : 1.2;
-      for (let i = 0; i < 6; i++) {
-        const y = (i * 130 + game2.scroll * speed + layer * 40) % (WORLD_H + 90) - 40;
-        ctx2.beginPath();
-        ctx2.moveTo(-10, y);
-        ctx2.bezierCurveTo(120, y + 10 + layer * 4, 280, y - 16, WORLD_W + 10, y + 8);
-        ctx2.stroke();
+    glow(ctx2, WORLD_W * 0.74, 28, 70, "rgba(255,244,210,0.45)");
+    const shift = game2.scroll % 640;
+    ctx2.fillStyle = "#1e6b3a";
+    ctx2.beginPath();
+    ctx2.moveTo(-20, 80 - shift * 0.15);
+    ctx2.lineTo(150, 20);
+    ctx2.lineTo(190, 160);
+    ctx2.lineTo(-20, 230);
+    ctx2.fill();
+    ctx2.fillStyle = "#2f8f4e";
+    ctx2.beginPath();
+    ctx2.moveTo(8, 70);
+    ctx2.lineTo(118, 36);
+    ctx2.lineTo(96, 128);
+    ctx2.closePath();
+    ctx2.fill();
+    for (let row = 0; row < 8; row++) {
+      const y = (row * 90 + game2.scroll * 0.85) % (GROUND_TOP + 90) - 70;
+      const side = row % 2 === 0 ? 250 : 300;
+      for (let col = 0; col < 6; col++) {
+        const x = side + col * 28;
+        const h = 16 + (row * 3 + col * 5) % 22;
+        ctx2.fillStyle = col % 3 === 0 ? "#d9dee6" : "#9aa4b2";
+        ctx2.fillRect(x, y - h, 18, h);
+        ctx2.fillStyle = "rgba(255,214,120,0.55)";
+        if ((col + row) % 2 === 0) ctx2.fillRect(x + 4, y - h + 4, 3, 3);
       }
     }
-    for (let i = 0; i < 18; i++) {
-      const y = (i * 48 + game2.scroll * 2.2) % (WORLD_H + 30) - 10;
-      const x = (i * 73 + Math.floor(game2.scroll) * 3) % WORLD_W;
-      ctx2.fillStyle = "rgba(255,255,255,0.28)";
-      ctx2.fillRect(x, y, 10 + i % 3 * 6, 1.4);
+    ctx2.fillStyle = "rgba(255,255,255,0.2)";
+    for (let i = 0; i < 7; i++) {
+      const y = (i * 78 + game2.scroll * 1.3) % (GROUND_TOP + 40) - 16;
+      ctx2.fillRect(70 + i * 37 % 180, y, 28 + i % 3 * 10, 2);
     }
     for (const isl of game2.islands) {
-      ctx2.fillStyle = "rgba(0,20,30,0.28)";
+      ctx2.fillStyle = "rgba(0,20,30,0.25)";
       ctx2.beginPath();
-      ctx2.ellipse(isl.x + 8, isl.y + 10, isl.r * 1.05, isl.r * 0.42, 0, 0, Math.PI * 2);
+      ctx2.ellipse(isl.x + 6, isl.y + 8, isl.r, isl.r * 0.36, 0, 0, Math.PI * 2);
       ctx2.fill();
-      ctx2.fillStyle = "#e6d2a2";
+      ctx2.fillStyle = "#e7d7ae";
       ctx2.beginPath();
-      ctx2.ellipse(isl.x, isl.y, isl.r, isl.r * 0.62, 0, 0, Math.PI * 2);
+      ctx2.ellipse(isl.x, isl.y, isl.r * 0.95, isl.r * 0.5, 0, 0, Math.PI * 2);
       ctx2.fill();
-      const land = ctx2.createRadialGradient(isl.x - 4, isl.y - 3, 2, isl.x, isl.y, isl.r);
-      land.addColorStop(0, "#8fd36a");
-      land.addColorStop(0.7, "#2f8f4e");
-      land.addColorStop(1, "#1c5e34");
-      ctx2.fillStyle = land;
+      ctx2.fillStyle = "#3d9a55";
       ctx2.beginPath();
-      ctx2.ellipse(isl.x, isl.y, isl.r * 0.78, isl.r * 0.46, 0, 0, Math.PI * 2);
+      ctx2.ellipse(isl.x - 2, isl.y - 1, isl.r * 0.62, isl.r * 0.3, 0, 0, Math.PI * 2);
       ctx2.fill();
     }
-    for (let i = 0; i < 5; i++) {
-      const y = (i * 170 + game2.scroll * 1.35) % (WORLD_H + 140) - 70;
-      const x = 40 + i * 97 % 340;
-      ctx2.fillStyle = "rgba(8,30,48,0.18)";
+    ctx2.fillStyle = "#f4f7fb";
+    ctx2.strokeStyle = "#1c4e38";
+    ctx2.lineWidth = 2;
+    for (let i = 0; i < 3; i++) {
+      const y = (i * 190 + game2.scroll * 1.5) % (GROUND_TOP + 80) - 30;
+      const x = 150 + i * 40;
       ctx2.beginPath();
-      ctx2.ellipse(x + 10, y + 26, 36, 10, 0, 0, Math.PI * 2);
+      ctx2.moveTo(x, y);
+      ctx2.lineTo(x + 34, y + 8);
+      ctx2.lineTo(x + 26, y + 14);
+      ctx2.lineTo(x - 6, y + 6);
+      ctx2.closePath();
       ctx2.fill();
-      ctx2.fillStyle = "rgba(255,255,255,0.9)";
-      ctx2.beginPath();
-      ctx2.ellipse(x, y, 30, 14, 0, 0, Math.PI * 2);
-      ctx2.ellipse(x + 22, y + 4, 22, 12, 0, 0, Math.PI * 2);
-      ctx2.ellipse(x - 16, y + 6, 16, 9, 0, 0, Math.PI * 2);
-      ctx2.fill();
+      ctx2.stroke();
     }
+    ctx2.fillStyle = "rgba(4,24,33,0.72)";
+    ctx2.font = "600 13px Oswald, sans-serif";
+    ctx2.textAlign = "left";
+    ctx2.fillText("THE PEAK", 18, 52);
+    ctx2.textAlign = "right";
+    ctx2.fillText("KOWLOON", WORLD_W - 16, 78);
+    ctx2.textAlign = "center";
+    ctx2.fillText("VICTORIA HARBOUR", WORLD_W / 2, 150);
     for (const s of game2.smoke) {
       ctx2.fillStyle = `rgba(226,232,236,${0.22 * (s.life / s.max)})`;
       ctx2.beginPath();
@@ -594,6 +813,31 @@
     }
     ctx2.globalAlpha = 1;
     ctx2.globalCompositeOperation = "source-over";
+    for (const item of game2.pickups) {
+      if (item.kind === "power") {
+        ctx2.save();
+        ctx2.translate(item.x, item.y);
+        ctx2.rotate(item.spin);
+        ctx2.fillStyle = "#e2b657";
+        ctx2.fillRect(-8, -8, 16, 16);
+        ctx2.fillStyle = "#041821";
+        ctx2.font = "700 12px sans-serif";
+        ctx2.textAlign = "center";
+        ctx2.fillText("P", 0, 4);
+        ctx2.restore();
+      } else if (item.y < GROUND_TOP) {
+        ctx2.strokeStyle = "#d7ecff";
+        ctx2.beginPath();
+        ctx2.moveTo(item.x, item.y - 22);
+        ctx2.lineTo(item.x - 8, item.y - 8);
+        ctx2.lineTo(item.x + 8, item.y - 8);
+        ctx2.closePath();
+        ctx2.fillStyle = "rgba(190,230,255,0.85)";
+        ctx2.fill();
+        ctx2.fillStyle = "#2f6f4e";
+        ctx2.fillRect(item.x - 7, item.y - 6, 14, 10);
+      }
+    }
     if (game2.boss) {
       ctx2.fillStyle = "rgba(10,8,8,0.65)";
       ctx2.fillRect(game2.boss.x - 54, game2.boss.y - 78, 108, 7);
@@ -605,9 +849,10 @@
       ctx2.fillRect(game2.boss.x - 54, game2.boss.y - 78, 108 * hp, 7);
     }
     if (game2.hurtFlash > 0) {
-      ctx2.fillStyle = `rgba(180,30,30,${game2.hurtFlash * 0.45})`;
-      ctx2.fillRect(-12, -12, WORLD_W + 24, WORLD_H + 24);
+      ctx2.fillStyle = `rgba(180,30,30,${game2.hurtFlash * 0.35})`;
+      ctx2.fillRect(-12, -12, WORLD_W + 24, GROUND_TOP);
     }
+    paintGround(ctx2, game2);
     const vignette = ctx2.createRadialGradient(WORLD_W / 2, WORLD_H / 2, 180, WORLD_W / 2, WORLD_H / 2, 460);
     vignette.addColorStop(0, "rgba(0,0,0,0)");
     vignette.addColorStop(1, "rgba(2,10,18,0.38)");
@@ -618,10 +863,79 @@
       ctx2.fillStyle = "#041821";
       ctx2.font = "600 32px Oswald, sans-serif";
       ctx2.textAlign = "center";
-      ctx2.fillText(game2.boss ? "BOMBER" : `WAVE ${game2.wave}`, WORLD_W / 2, WORLD_H / 2);
+      ctx2.fillText(game2.bannerText || (game2.boss ? "BOMBER" : `WAVE ${game2.wave}`), WORLD_W / 2, GROUND_TOP / 2);
       ctx2.globalAlpha = 1;
     }
     ctx2.restore();
+  }
+  function paintGround(ctx2, game2) {
+    const top = GROUND_TOP;
+    ctx2.fillStyle = "#1b1f24";
+    ctx2.fillRect(0, top, WORLD_W, WORLD_H - top);
+    ctx2.fillStyle = "#3a414b";
+    ctx2.fillRect(0, top + 28, WORLD_W, WORLD_H - top - 28);
+    ctx2.strokeStyle = "#e2b657";
+    ctx2.lineWidth = 3;
+    ctx2.beginPath();
+    ctx2.moveTo(0, top + 78);
+    ctx2.lineTo(WORLD_W - 78, top + 78);
+    ctx2.stroke();
+    ctx2.strokeStyle = "#f4f7fb";
+    ctx2.setLineDash([10, 8]);
+    ctx2.lineWidth = 2;
+    ctx2.beginPath();
+    ctx2.moveTo(8, top + 78);
+    ctx2.lineTo(WORLD_W - 86, top + 78);
+    ctx2.stroke();
+    ctx2.setLineDash([]);
+    ctx2.fillStyle = "#d9dee6";
+    ctx2.fillRect(WORLD_W - 86, top + 18, 86, WORLD_H - top - 18);
+    ctx2.fillStyle = "#0c3348";
+    ctx2.fillRect(WORLD_W - 70, top + 8, 16, 36);
+    ctx2.fillStyle = "#e2b657";
+    ctx2.beginPath();
+    ctx2.arc(WORLD_W - 62, top + 8, 6, 0, Math.PI * 2);
+    ctx2.fill();
+    ctx2.fillStyle = "#041821";
+    ctx2.font = "600 11px Oswald, sans-serif";
+    ctx2.textAlign = "center";
+    ctx2.fillText("AIRPORT", WORLD_W - 43, top + 48);
+    const base = top + 78;
+    for (const f of game2.foes) drawFighter(ctx2, f.x, base, false, f.kind === "tank");
+    for (const s of game2.troops) drawFighter(ctx2, s.x, base, true, s.heavy);
+    ctx2.fillStyle = "rgba(4,24,33,0.8)";
+    ctx2.fillRect(8, top + 6, 168, 16);
+    ctx2.fillStyle = "#123246";
+    ctx2.fillRect(10, top + 8, 164, 12);
+    ctx2.fillStyle = game2.airport > 90 ? "#7dcea0" : "#e2b657";
+    ctx2.fillRect(10, top + 8, 164 * (game2.airport / 100), 12);
+    ctx2.fillStyle = "#f4f7fb";
+    ctx2.font = "600 11px sans-serif";
+    ctx2.textAlign = "left";
+    ctx2.fillText("AIRPORT", 14, top + 18);
+    ctx2.textAlign = "right";
+    ctx2.fillText(`FIRE ${game2.weapon}`, 170, top + 18);
+  }
+  function drawFighter(ctx2, x, y, friendly, heavy) {
+    ctx2.fillStyle = "rgba(0,0,0,0.35)";
+    ctx2.fillRect(x - 8, y + 2, heavy ? 28 : 16, 4);
+    ctx2.fillStyle = friendly ? "#2f6f4e" : "#8c3a32";
+    ctx2.fillRect(x - 5, y - 16, 10, 12);
+    ctx2.fillStyle = friendly ? "#173c2c" : "#3d1816";
+    ctx2.fillRect(x - 4, y - 22, 8, 7);
+    if (heavy) {
+      ctx2.fillStyle = friendly ? "#24563c" : "#5c4030";
+      ctx2.fillRect(x - 10, y - 8, 26, 10);
+      ctx2.fillStyle = "#222";
+      ctx2.fillRect(x + 12, y - 6, 12, 3);
+    } else {
+      ctx2.strokeStyle = "#222";
+      ctx2.lineWidth = 2;
+      ctx2.beginPath();
+      ctx2.moveTo(x + (friendly ? 4 : -4), y - 12);
+      ctx2.lineTo(x + (friendly ? 16 : -16), y - 10);
+      ctx2.stroke();
+    }
   }
   var URIS = window.__URIS;
   var canvas = document.getElementById("c");
@@ -711,8 +1025,12 @@
     waveEl.textContent = String(game.wave);
     const lives = document.getElementById("lives");
     const rolls = document.getElementById("rolls");
+    const fire = document.getElementById("fire");
+    const port = document.getElementById("port");
     if (lives) lives.textContent = String(game.lives);
     if (rolls) rolls.textContent = String(game.rolls);
+    if (fire) fire.textContent = String(game.weapon);
+    if (port) port.textContent = String(Math.round(game.airport));
     requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);

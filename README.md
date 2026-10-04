@@ -1,14 +1,15 @@
 # Pacific Sweep
 
-Play the updated game in a browser:
+Play the Hong Kong mission in a browser:
 
-https://htmlpreview.github.io/?https://github.com/Holqang/pacific-sweep/blob/main/play.html
+https://htmlpreview.github.io/?https://github.com/Holqang/pacific-sweep/blob/main/hk.html
 
-The page says **Updated look · sunlit seas** under the title. If you still see the old sea, use that link, not a saved copy of the old page.
+The page says **Hong Kong · air and airport**.
 
 ## How to play
 
-1. Press **Take off** (or Enter).
-2. Arrow keys or WASD move the plane.
-3. Space shoots. Shift rolls through fire.
-4. On a phone, use the buttons under the picture.
+1. Press **Take off**.
+2. Arrow keys or WASD move. Space shoots. Shift rolls.
+3. Pick up the gold **P** to raise your fire power. Getting hit drops it by one.
+4. Blue supply crates fall to the army on the airport strip.
+5. When the runway bar fills, dive to the bottom of the sky to land.
